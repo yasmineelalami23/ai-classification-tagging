@@ -1,0 +1,39 @@
+# References
+
+Deep-dive technical documentation for optional follow-up.
+
+## Infrastructure
+
+- [Bootstrap](bootstrap.md) - Complete bootstrap setup for both deployment modes
+- [Protection Strategies](protection-strategies.md) - Branch, tag, environment protection
+- [Deployment Modes](deployment.md) - Multi-environment strategy and infrastructure
+- [CI/CD Workflows](cicd.md) - Workflow architecture and mechanics
+- [Claude PR Review](claude-pr-review.md) - Automated PR review setup: GitHub App, model auth paths, and workflow behavior
+- [Cloud SQL Scaling and Reliability](cloud-sql.md) - Instance tiers, backups, HA, connection pooling, monitoring
+- [Cloud Run Concurrency Tuning](cloud-run-concurrency-tuning.md) - Async runtime model and concurrency sizing
+
+## Security
+
+- [Security Posture](security-posture.md) - Defense-in-depth rationale and architectural security decisions
+
+## Operations
+
+- [ADK Origin Check Middleware](adk-origin-check-middleware.md) - Origin validation, CORS interaction, and ALLOW_ORIGINS configuration
+- [Image Digest Resolution](image-digest-resolution.md) - Index vs platform digests, provenance verification, and digest-based debugging
+- [OpenTelemetry Architecture](opentelemetry-architecture.md) - ADK coexistence, instrumentation strategy, dependency management
+
+## Development
+
+- [Testing Strategy](testing.md) - Lane taxonomy and the unit-test guide
+- [Integration Tests](integration-tests.md) - The Postgres + FastAPI lane: coverage, running locally, and CI
+- [Smoke Tests](smoke-tests.md) - The post-deploy lane: live-URL checks, authentication, running locally, and CI
+- [Agent Evals](agent-evals.md) - The full agent-evaluation surface: formats, commands, metrics, and user simulation
+- [Code Quality](code-quality.md) - Tool usage and exclusion strategies
+- [Cloud Backend Options](cloud-backend-options.md) - Advanced options for uv run server with cloud backends
+- [Docker Compose Workflow](docker-compose-workflow.md) - Watch mode, volumes, and configuration
+- [Dockerfile Strategy](dockerfile-strategy.md) - Multi-stage builds and optimization
+- [MkDocs Setup](mkdocs-setup.md) - Documentation site setup and customization
+
+---
+
+← [Back to Documentation](../README.md)

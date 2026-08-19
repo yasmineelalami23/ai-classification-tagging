@@ -1,0 +1,324 @@
+# Environment Variables
+
+Complete configuration reference. Single source of truth.
+
+See `.env.example` in the repository root for template configuration with inline comments.
+
+## Quick Reference
+
+| Variable | Required | Default | Purpose |
+|----------|----------|---------|---------|
+| **[GOOGLE_GENAI_USE_ENTERPRISE](#google-cloud-vertex-ai)** | ✅ | - | Enable Vertex AI authentication |
+| **[GOOGLE_CLOUD_PROJECT](#google-cloud-vertex-ai)** | ✅ | - | GCP project ID |
+| **[GOOGLE_CLOUD_LOCATION](#google-cloud-vertex-ai)** | ✅ | - | Vertex AI model endpoint location |
+| **[AGENT_NAME](#agent-identification)** | ✅ | - | Unique agent identifier |
+| **[OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT](#opentelemetry)** | ✅ | - | Capture LLM content in traces |
+| **[BASTION_INSTANCE](#cloud-resources)** | Recommended | - | Bastion host name for IAP tunnel (docker-compose) |
+| **[BASTION_ZONE](#cloud-resources)** | Recommended | - | Bastion host zone for IAP tunnel (docker-compose) |
+| **[SESSION_SERVICE_URI](#cloud-resources)** | Recommended | in-memory | Session persistence |
+| **[MEMORY_SERVICE_URI](#cloud-resources)** | Recommended | in-memory | Memory persistence |
+| **[ARTIFACT_SERVICE_URI](#cloud-resources)** | Recommended | in-memory | Artifact storage |
+| [LOG_LEVEL](#logging) | Optional | `INFO` | Logging verbosity |
+| [TELEMETRY_NAMESPACE](#logging) | Optional | `local` | Trace grouping |
+| [SERVE_WEB_INTERFACE](#agent-features) | Optional | `FALSE` | Enable ADK web UI |
+| [RELOAD_AGENTS](#agent-features) | Optional | `FALSE` | Hot-reload on file changes |
+| [ALLOW_ORIGINS](#cors) | Optional | `["http://127.0.0.1:8000", "http://localhost:8000"]` | CORS allowed origins |
+| [AGENT_DIR](#advanced) | Optional | Auto-detected | Override agent directory |
+| [HOST](#advanced) | Optional | `127.0.0.1` | Server bind address |
+| [PORT](#advanced) | Optional | `8000` | Server listening port |
+| [ADK_SUPPRESS_EXPERIMENTAL_FEATURE_WARNINGS](#advanced) | Optional | `FALSE` | Suppress ADK warnings |
+
+**Cloud Run auto-set:** [K_REVISION](#cloud-run-auto-set-read-only)
+
+**CI/CD only:** [TF_VAR_*](#terraform-inputs-tf_var_) variables and [repository secrets](#repository-secrets) (GitHub Actions)
+
+**Test lanes:** [test lane inputs](#test-lane-inputs) (set by CI, or as a prefix on a local test command)
+
+---
+
+## Required
+
+These must be set for the agent to function.
+
+### Google Cloud Vertex AI
+
+**GOOGLE_GENAI_USE_ENTERPRISE**
+- **Value:** `TRUE`
+- **Purpose:** Enables Vertex AI authentication for Gemini models
+- **Where:** Set locally in `.env`, auto-configured in Cloud Run
+- **Note:** Replaces `GOOGLE_GENAI_USE_VERTEXAI`, deprecated in ADK 2.4.0. The old name still resolves, but every request that reads it emits a `DeprecationWarning`. Update an existing local `.env` to silence it. When both are set, `GOOGLE_GENAI_USE_ENTERPRISE` wins
+
+**GOOGLE_CLOUD_PROJECT**
+- **Value:** Your GCP project ID (e.g., `your-project-id`)
+- **Purpose:** Identifies the Google Cloud project for Vertex AI and other GCP services
+- **Where:** Set locally in `.env`, configured via Terraform for Cloud Run
+
+**GOOGLE_CLOUD_LOCATION**
+- **Value:** Vertex AI model endpoint location (e.g., `global` or `us-central1`)
+- **Purpose:** Routes Vertex AI model calls only. Does not set the deployment region. Infrastructure placement is controlled separately by the `region` Terraform variable (`REGION` GitHub Environment Variable)
+- **Where:** Set locally in `.env`, configured via Terraform for Cloud Run (`TF_VAR_google_cloud_location`)
+
+### Agent Identification
+
+**AGENT_NAME**
+- **Value:** Unique identifier (e.g., `your-agent`)
+- **Purpose:** Identifies cloud resources, logs, and traces
+- **Where:** Set locally in `.env`, set before bootstrap (used for Terraform resource naming)
+- **Note:** Used as base name for Terraform resources (`{agent_name}-{environment}`)
+
+### OpenTelemetry
+
+**OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT**
+- **Options:**
+  - `TRUE` - Capture full prompts and responses in traces
+  - `FALSE` - Capture metadata only (no message content)
+- **Purpose:** Controls LLM message content capture in OpenTelemetry traces
+- **Where:** Set locally in `.env`, set before bootstrap
+- **Reference:** [OpenTelemetry GenAI Instrumentation](https://opentelemetry.io/blog/2024/otel-generative-ai/#example-usage)
+- **Security:** Set to `FALSE` if handling sensitive data
+
+---
+
+## Cloud Resources
+
+Production-ready persistence for sessions, memory, and artifacts. Configure after first deployment.
+
+**BASTION_INSTANCE**
+- **Value:** Bastion VM instance name (e.g., `my-agent-dev-bastion`)
+- **Purpose:** IAP tunnel target for docker-compose Cloud SQL connectivity
+- **Where:** Set locally in `.env` for docker-compose (the IAP tunnel container uses this)
+- **How to get:** GitHub Actions job summary or `terraform output bastion_instance`
+- **Note:** Only used by docker-compose, not by the application. Cloud Run connects to Cloud SQL via direct VPC egress.
+
+**BASTION_ZONE**
+- **Value:** GCE zone (e.g., `us-central1-b`)
+- **Purpose:** Zone of the bastion host for IAP tunnel
+- **Where:** Set locally in `.env` for docker-compose
+- **How to get:** GitHub Actions job summary or `terraform output bastion_zone`
+- **Note:** Only used by docker-compose.
+
+**SESSION_SERVICE_URI**
+- **Value:** Service-specific URI with protocol prefix (e.g., `postgresql+asyncpg://sa-name@project.iam:@localhost:5432/agent_sessions`)
+- **Purpose:** Session persistence (production-consistent behavior)
+- **Where:** Set locally in `.env` after first deployment, auto-configured in Cloud Run
+- **How to get:** GitHub Actions job summary (`gh run view <run-id>`) or `terraform output session_service_uri`
+- **Note:** Database Session Service connects through Cloud SQL Auth Proxy on localhost. IAM database auth — no password needed. Defaults to in-memory if unset.
+
+**MEMORY_SERVICE_URI**
+- **Value:** Service-specific URI with protocol prefix (e.g., `agentengine://projects/123/locations/us-central1/reasoningEngines/456`)
+- **Purpose:** Memory persistence (production-consistent behavior)
+- **Where:** Set locally in `.env` after first deployment, auto-configured in Cloud Run
+- **How to get:** GitHub Actions job summary (`gh run view <run-id>`) or `terraform output memory_service_uri`
+- **Note:** Defaults to in-memory if unset (not recommended for development)
+
+**ARTIFACT_SERVICE_URI**
+- **Value:** GCS bucket URI (e.g., `gs://your-artifact-bucket`)
+- **Purpose:** Artifact storage persistence (production-consistent behavior)
+- **Where:** Set locally in `.env` after first deployment, auto-configured in Cloud Run
+- **How to get:** GitHub Actions job summary (`gh run view <run-id>`) or GCP Console (Cloud Storage → Buckets)
+- **Note:** Defaults to in-memory if unset (not recommended for development)
+
+---
+
+## Runtime Configuration (Optional)
+
+### Logging
+
+**LOG_LEVEL**
+- **Options:** `DEBUG`, `INFO`, `WARNING`, `ERROR`, `CRITICAL`
+- **Default:** `INFO`
+- **Purpose:** Controls logging verbosity
+- **Where:** Set locally via `.env` or command line, configure via GitHub Environment Variables for Cloud Run
+- **Usage:**
+  ```bash
+  LOG_LEVEL=DEBUG uv run server
+  ```
+
+**TELEMETRY_NAMESPACE**
+- **Default:** `local`
+- **Purpose:** Groups traces and logs by developer in Cloud Trace — set to a unique value (e.g., your name) so teammates can filter to your experiments for collaborative debugging and review
+- **Where:** Set locally via `.env`, auto-set to environment name in Cloud Run deployments (dev/stage/prod)
+- **Note:** Both `uv run server` and Docker Compose always export traces and structured logs to Cloud Trace and Cloud Logging. This is always on — there is no local-only telemetry mode.
+- **Example:** `TELEMETRY_NAMESPACE=alice-local`
+
+### Agent Features
+
+**SERVE_WEB_INTERFACE**
+- **Default:** `FALSE`
+- **Purpose:** Enables ADK web UI at http://127.0.0.1:8000
+- **Where:** Set locally via `.env`, configure via GitHub Environment Variables for Cloud Run
+- **Options:**
+  - `FALSE` - API-only mode
+  - `TRUE` - Enable web interface
+
+**RELOAD_AGENTS**
+- **Default:** `FALSE`
+- **Purpose:** Enable agent hot-reloading on file changes (development only)
+- **Where:** Local development only
+- **WARNING:** Set to `FALSE` in production (Cloud Run forces `FALSE`)
+
+### CORS
+
+**ALLOW_ORIGINS**
+- **Default:** `'["http://127.0.0.1:8000", "http://localhost:8000"]'`
+- **Format:** JSON array string
+- **Purpose:** Configure CORS allowed origins
+- **Where:** Hard-coded in Terraform for Cloud Run, configurable locally via `.env`
+- **Example:** `ALLOW_ORIGINS='["https://your-domain.com", "http://127.0.0.1:3000"]'`
+
+### Advanced
+
+**AGENT_DIR**
+- **Default:** Auto-detected (parent directory of `server.py`)
+- **Purpose:** Override agent directory path for ADK
+- **Where:** Set in Dockerfile (`/app/src`), rarely needed locally
+- **Note:** Only override if you need non-standard directory structure
+
+**HOST**
+- **Default:** `127.0.0.1`
+- **Purpose:** Server bind address
+- **Where:** Rarely needs override - defaults work for most use cases
+- **Note:** Docker Compose overrides to `0.0.0.0` in container for host access, Cloud Run manages internally
+
+**PORT**
+- **Default:** `8000`
+- **Purpose:** Server listening port
+- **Where:** Rarely needs override - Cloud Run always uses 8000, Docker Compose maps to host port 8000
+- **Note:** Only override if you have port conflicts on your local machine
+
+**ADK_SUPPRESS_EXPERIMENTAL_FEATURE_WARNINGS**
+- **Default:** `FALSE`
+- **Purpose:** Suppress ADK experimental feature warnings
+- **Options:**
+  - `FALSE` - Show warnings
+  - `TRUE` - Suppress warnings
+
+### Cloud Run Auto-Set (Read-Only)
+
+These variables are automatically set by Cloud Run. Do not set manually.
+
+**K_REVISION**
+- **Purpose:** Cloud Run revision identifier
+- **Where:** Auto-set by Cloud Run (used for `service.version` in traces)
+- **Example:** `your-agent-dev-00042-abc`
+
+---
+
+## CI/CD Only
+
+These variables are used exclusively in GitHub Actions workflows. Do not set locally.
+
+### Terraform Inputs (TF_VAR_*)
+
+GitHub Environment Variables are mapped to Terraform inputs via `TF_VAR_*` prefix:
+
+**TF_VAR_project**
+- **Source:** `${{ vars.GOOGLE_CLOUD_PROJECT }}` (GitHub Environment Variable)
+- **Purpose:** GCP project ID for Terraform
+
+**TF_VAR_region**
+- **Source:** `${{ vars.REGION }}` (GitHub Environment Variable)
+- **Purpose:** GCP region for compute resource placement
+
+**TF_VAR_zone**
+- **Source:** `${{ vars.ZONE }}` (GitHub Environment Variable)
+- **Purpose:** GCP zone for bastion host placement
+
+**TF_VAR_google_cloud_location**
+- **Source:** `${{ vars.GOOGLE_CLOUD_LOCATION }}` (GitHub Environment Variable, optional)
+- **Purpose:** Vertex AI model endpoint routing (recommended default `"global"` in bootstrap terraform.tfvars.example)
+
+**TF_VAR_agent_name**
+- **Source:** `${{ vars.IMAGE_NAME }}` (GitHub Environment Variable)
+- **Purpose:** Agent name for resource naming
+
+**TF_VAR_terraform_state_bucket**
+- **Source:** `${{ vars.TERRAFORM_STATE_BUCKET }}` (GitHub Environment Variable)
+- **Purpose:** GCS bucket for Terraform state
+
+**TF_VAR_docker_image**
+- **Source:** `${{ inputs.docker_image }}` (workflow input)
+- **Purpose:** Immutable image digest for deployment
+
+**TF_VAR_environment**
+- **Source:** Set by workflow (dev/stage/prod)
+- **Purpose:** Environment-specific resource naming
+
+**TF_VAR_workload_identity_pool_principal_identifier**
+- **Source:** `${{ vars.WORKLOAD_IDENTITY_POOL_PRINCIPAL_IDENTIFIER }}` (GitHub Environment Variable, auto-created by bootstrap)
+- **Purpose:** WIF principal identifier for binding additional IAM roles in `terraform/main/iam.tf`
+
+### Runtime Configuration Overrides
+
+Override runtime config via GitHub Environment Variables (mapped to `TF_VAR_*`):
+
+**TF_VAR_log_level**
+- **Source:** `${{ vars.LOG_LEVEL }}` (optional GitHub Environment Variable)
+- **Purpose:** Override LOG_LEVEL for Cloud Run deployment
+
+**TF_VAR_serve_web_interface**
+- **Source:** `${{ vars.SERVE_WEB_INTERFACE }}` (optional GitHub Environment Variable)
+- **Purpose:** Override SERVE_WEB_INTERFACE for Cloud Run deployment
+
+**TF_VAR_otel_instrumentation_genai_capture_message_content**
+- **Source:** `${{ vars.OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT }}` (optional GitHub Environment Variable)
+- **Purpose:** Override OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT for Cloud Run deployment
+
+### Test Lane Inputs
+
+Read by test lanes rather than by the application, so they never appear in `ServerEnv` or on Cloud Run. CI sets them from workflow inputs; set them locally only to run a lane by hand, as a prefix on the command itself.
+
+> [!NOTE]
+> `.env` does not set these. The smoke lane never loads `.env` at all and raises on an unset `SMOKE_*`. The eval lane takes no environment input: what it scores is fixed in constants in `tests/eval/test_agent_eval.py`, so a run cannot be reconfigured from outside the file it is defined in.
+
+**SMOKE_BASE_URL**, **SMOKE_INVOKER_SA**
+- **Source:** `smoke.yml`, from the apply job's `smoke_target_url` and `smoke_invoker_service_account_email` outputs
+- **Purpose:** Deployed service URL and the invoker SA the smoke client impersonates. See [Smoke Tests](references/smoke-tests.md)
+
+**INTEGRATION_DATABASE_URI**
+- **Source:** Not set in CI (the lane starts a throwaway `postgres:18` via testcontainers)
+- **Purpose:** Point the integration lane at an already-running Postgres instead. See [Integration Tests](references/integration-tests.md)
+
+### Repository Secrets
+
+Set in GitHub Actions > Secrets and variables > Actions. Both select the model auth path for the `claude.yml` PR review; when neither is set, the review authenticates via Workload Identity Federation and calls Vertex AI. See [Claude PR Review](references/claude-pr-review.md).
+
+**ANTHROPIC_API_KEY**
+- **Source:** Repository secret (optional, set manually)
+- **Purpose:** Runs the review against the Anthropic API with an organization API key instead of Vertex AI. Takes precedence over `CLAUDE_CODE_OAUTH_TOKEN`
+
+**CLAUDE_CODE_OAUTH_TOKEN**
+- **Source:** Repository secret (optional, set manually; generate with `claude setup-token`)
+- **Purpose:** Runs the review against the Anthropic API with an individual account's Claude Code OAuth token instead of Vertex AI. Ignored when `ANTHROPIC_API_KEY` is set. Expires about a year after creation and must be rotated
+
+> [!NOTE]
+> These two names are also what the local Claude Code CLI reads for its own authentication. The "do not set locally" guidance above applies to the `TF_VAR_*` variables, not to these.
+
+---
+
+## Reference
+
+### Where Variables Are Set
+
+**Local Development:**
+- `.env` file (loaded via `python-dotenv`)
+- Command line (e.g., `LOG_LEVEL=DEBUG uv run server`)
+- `docker-compose.yml` (Docker Compose)
+
+**Cloud Run:**
+- Terraform `main` module (`terraform/main/main.tf`)
+- GitHub Environment Variables → `TF_VAR_*` → Terraform → Cloud Run environment
+
+**CI/CD:**
+- GitHub Environment Variables (auto-created by bootstrap)
+- Workflow inputs and outputs
+
+### Security
+
+- **Never commit `.env` files** to version control - Already gitignored
+- **Workload Identity Federation** - No service account keys needed for CI/CD
+- **Sensitive data** - Set `OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT=FALSE` when handling sensitive information
+
+---
+
+← [Back to Documentation](README.md)

@@ -1,0 +1,58 @@
+"""Agent implementation public package interface.
+
+ADK agent discovery (google.adk.cli.utils.agent_loader.AgentLoader._perform_load)
+tries in order:
+1. {agent_name}/__init__.py exports (method: _load_from_module_or_package)
+2. {agent_name}/agent.py exports (method: _load_from_submodule)
+3. {agent_name}/root_agent.yaml (method: _load_from_yaml_config)
+
+ADK eval command (google.adk.cli.utils.cli_eval.get_root_agent) requires:
+  agent_module.agent.root_agent
+
+This module uses __getattr__ for true lazy loading to support both eval CLI
+and web server requirements while allowing .env file to load before agent.py
+reads module-level environment variables.
+
+ref: https://peps.python.org/pep-0562/
+
+Lazy loading workflow:
+1. Package import does NOT trigger agent.py execution
+2. server.py loads .env file via initialize_environment()
+3. server.py creates FastAPI app (does not access agent attribute)
+4. First access to agent attribute → agent.py imports and executes
+5. At that point, all .env variables like FAQ_DATA_STORE are available
+
+App-aware eval trigger:
+The import-time block below makes ADK's eval-inference path run the full App
+(its plugins), not the bare root_agent, so it covers every non-live eval
+surface. It
+catches ModuleNotFoundError (not bare ImportError) so the prod runtime image,
+where the eval dependencies and thus google.adk.evaluation are absent, is a
+no-op, while a renamed ADK symbol surfaces loudly instead of silently disabling
+App-aware eval. See _eval_app_aware_patch for the full rationale. Remove this
+block along with _eval_app_aware_patch when the upstream App-aware eval fix
+(adk-python#5503, proposed fix in #6480) lands in a released ADK.
+"""
+
+import importlib
+from types import ModuleType
+
+__all__ = ["agent"]
+
+try:
+    from ._eval_app_aware_patch import apply_app_aware_eval_patch
+
+    apply_app_aware_eval_patch()
+except ModuleNotFoundError:
+    pass
+
+
+def __getattr__(name: str) -> ModuleType:
+    """Lazy load agent module when accessed.
+
+    This defers agent.py import until the agent attribute is actually accessed,
+    allowing .env file to load first in server.py.
+    """
+    if name in __all__:
+        return importlib.import_module("." + name, __package__)
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

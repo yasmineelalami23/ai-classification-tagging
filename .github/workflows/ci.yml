@@ -1,0 +1,226 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  pull-requests: read
+  contents: read
+
+jobs:
+  changes:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5  # Typical run: <1 min (path filtering). 5 min is generous buffer
+    outputs:
+      code: ${{ steps.filter.outputs.code }}
+      workflows: ${{ steps.filter.outputs.workflows }}
+    steps:
+      - uses: actions/checkout@v6
+      - uses: dorny/paths-filter@v4
+        id: filter
+        with:
+          filters: |
+            # Tracks the PyPA src-layout convention: source under src/, tests under tests/
+            # https://packaging.python.org/en/latest/discussions/src-layout-vs-flat-layout/
+            code:
+              - 'src/**'
+              - 'tests/**'
+              - 'pyproject.toml'
+              - 'uv.lock'
+              - '.github/workflows/ci.yml'
+              # Holds a pin that tests/unit/test_pinned_versions.py asserts against
+              - '.pre-commit-config.yaml'
+            workflows:
+              - '.github/workflows/**'
+
+  code-quality:
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
+    name: Code Quality and Tests (Python ${{ matrix.python-version }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 10  # Typical run: 2-3 min (format, lint, type check, tests). 10 min prevents hanging
+    strategy:
+      matrix:
+        python-version: ['3.13']
+      fail-fast: false
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 1
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: true
+          cache-dependency-glob: "uv.lock"
+
+      - name: Set up Python ${{ matrix.python-version }}
+        run: uv python install ${{ matrix.python-version }}
+
+      - name: Install dependencies
+        run: uv sync --all-extras --locked
+
+      - name: Run Ruff formatting check
+        run: uv run ruff format --check
+        if: success() || failure()
+
+      - name: Run Ruff linting
+        run: uv run ruff check --output-format=github
+        if: success() || failure()
+
+      - name: Run MyPy type checking
+        run: uv run mypy
+        if: success() || failure()
+
+      - name: Run pytest with coverage
+        run: uv run pytest --cov
+        if: success() || failure()
+
+  integration:
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
+    name: Integration Tests (Postgres)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10  # Typical run: 2-3 min (deps + Postgres lane, incl. image pull). 10 min prevents hanging
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 1
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: true
+          cache-dependency-glob: "uv.lock"
+          # Restore-only: same key as code-quality, which is the sole saver (avoids reserve race)
+          save-cache: false
+
+      - name: Set up Python
+        run: uv python install 3.13
+
+      - name: Install dependencies
+        run: uv sync --all-extras --locked
+
+      - name: Run integration tests
+        run: uv run pytest tests/integration
+
+  # Agent eval using deterministic scoring metrics (no LLM judge)
+  agent-eval:
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
+    name: Agent Eval (deterministic)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10  # Typical run: 2-3 min (sync + two live inference runs): 10 min prevents hanging
+    environment: dev
+    permissions:
+      contents: read
+      id-token: write  # WIF auth for Vertex AI inference
+    env:
+      GOOGLE_GENAI_USE_ENTERPRISE: "TRUE"
+      GOOGLE_CLOUD_PROJECT: ${{ vars.GOOGLE_CLOUD_PROJECT }}
+      GOOGLE_CLOUD_LOCATION: ${{ vars.GOOGLE_CLOUD_LOCATION }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 1
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: true
+          cache-dependency-glob: "uv.lock"
+          # Restore-only: same key as code-quality, which is the sole saver (avoids reserve race)
+          save-cache: false
+
+      - name: Set up Python
+        run: uv python install 3.13
+
+      - name: Install dependencies
+        run: uv sync --all-extras --locked
+
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v3
+        with:
+          project_id: ${{ vars.GOOGLE_CLOUD_PROJECT }}
+          workload_identity_provider: ${{ vars.WORKLOAD_IDENTITY_PROVIDER }}
+
+      - name: Run deterministic agent evals
+        run: uv run pytest tests/eval -m "deterministic"
+
+  # Static analysis of GHA workflow files
+  actionlint:
+    needs: changes
+    if: needs.changes.outputs.workflows == 'true'
+    name: Workflow Lint (actionlint)
+    runs-on: ubuntu-latest
+    timeout-minutes: 5  # Typical run: <1 min (image pull + lint). 5 min is generous buffer
+    steps:
+      # actionlint reads the repo's git metadata to find the project root
+      - name: Checkout repository
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 1
+
+      # Upstream's published image. Keep the tag in sync with `rev` in
+      # .pre-commit-config.yaml so the hook and this gate agree.
+      # TODO: `-shellcheck=` disables the shellcheck pass over inline `run:` blocks.
+      # The runner ships shellcheck, so the pass is deterministic here; it is off
+      # only because the 59 pre-existing SC2086/SC2129 findings are not yet fixed.
+      # Remove the flag with those findings (#255).
+      - name: Run actionlint
+        uses: docker://rhysd/actionlint:1.7.12
+        with:
+          args: -color -shellcheck=
+
+  # Always-runs sentinel for branch protection
+  status:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5  # Typical run: <1 min (status check). 5 min is generous buffer
+    needs: [changes, code-quality, integration, agent-eval, actionlint]
+    if: always()
+    steps:
+      # The code and workflows filters are independent, so each lane reports on
+      # its own and a failure in either fails the sentinel
+      - name: Check required status
+        run: |
+          if [[ "${{ needs.changes.result }}" != "success" ]]; then
+            echo "❌ Changes detection failed (result: ${{ needs.changes.result }})"
+            exit 1
+          fi
+
+          failed=0
+
+          if [[ "${{ needs.changes.outputs.code }}" == "true" ]]; then
+            if [[ "${{ needs.code-quality.result }}" != "success" ]]; then
+              echo "❌ Code quality and tests failed"
+              failed=1
+            elif [[ "${{ needs.integration.result }}" != "success" ]]; then
+              echo "❌ Integration tests failed"
+              failed=1
+            elif [[ "${{ needs.agent-eval.result }}" != "success" ]]; then
+              echo "❌ Agent eval gate failed"
+              failed=1
+            else
+              echo "✅ Code quality, tests, integration, and agent evals passed"
+            fi
+          else
+            echo "⏭️ Code quality, tests, integration, and agent evals skipped - no relevant files changed"
+          fi
+
+          if [[ "${{ needs.changes.outputs.workflows }}" == "true" ]]; then
+            if [[ "${{ needs.actionlint.result }}" != "success" ]]; then
+              echo "❌ Workflow lint failed"
+              failed=1
+            else
+              echo "✅ Workflow lint passed"
+            fi
+          else
+            echo "⏭️ Workflow lint skipped - no workflow files changed"
+          fi
+
+          exit "${failed}"

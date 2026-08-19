@@ -1,0 +1,79 @@
+# agent-foundation
+
+![CI](https://github.com/doughayden/agent-foundation/actions/workflows/ci.yml/badge.svg)
+![CI/CD](https://github.com/doughayden/agent-foundation/actions/workflows/ci-cd.yml/badge.svg)
+[![Documentation](https://img.shields.io/badge/docs-mkdocs-blue)](https://doughayden.github.io/agent-foundation/)
+
+Opinionated, production-ready LLM Agent deployment with enterprise-grade infrastructure
+
+## What is this?
+
+A comprehensive template for building and deploying LLM Agents, including those built using Google Agent Development Kit (ADK) to production. This is a complete, battle-tested foundation with automated CI/CD, managed state persistence, custom observability, and proven cloud infrastructure.
+
+Built for teams who need to move beyond prototypes and ship production AI agents with confidence.
+
+## Design priorities
+- **Opinionated foundation**: Single optimized path (GitHub Actions + Terraform) built for extension
+- **Low-level control**: Direct infrastructure management for teams who need flexibility and performance without the CLI abstraction
+
+## Features
+
+### ⚙️ Development & Build Optimization
+- **Optimized Docker builds**: Multi-stage builds with uv (~200MB images, fast rebuilds with layer caching)
+- **Developer experience**: File sync with auto-restart via Docker Compose watch mode for fast feedback
+- **Code quality**: Strict type checking (mypy), 100% test coverage, modern linting (ruff)
+- **Template-ready**: One-command initialization script for rapid project setup
+
+### 🏗️ Production Infrastructure
+- **Automated CI/CD**: GitHub Actions with Terraform IaC, smart PR automation with plan comments
+- **Automated code reviews**: Claude Code integration in CI
+- **Cloud Run deployment**: Production-grade hosting with regional redundancy and autoscaling
+- **Environment isolation**: Multi-environment deployments (dev/stage/prod)
+- **Global scalability**: Create multi-region deployments by adding External Application Load Balancer
+
+### 🤖 Agent Capabilities
+- **Database sessions**: Cloud SQL Postgres for durable conversation state
+- **Artifact storage**: GCS-backed persistent storage for session artifacts
+- **Custom observability**: OpenTelemetry instrumentation with full trace-log correlation
+
+### 🔒 Security & Reliability
+- **Hardened Cloud SQL**: Private IP only, IAM database auth (no passwords), enforced TLS, enforced Auth Proxy (no direct connections)
+- **Workload Identity Federation**: Keyless CI/CD authentication (no service account keys)
+- **Non-root containers**: Security-hardened runtime with least-privilege IAM
+- **Health checks**: Kubernetes-style probes with startup grace periods
+
+## Try It Locally
+
+Run the agent with no cloud dependencies: [Development: Quick Start](docs/development.md#quick-start)
+
+## Getting Started
+
+> [!IMPORTANT]
+> Complete deployment first to create required resources (Cloud SQL, Agent Engine, GCS buckets, other agent-specific resources) before running locally with cloud persistence.
+
+> [!NOTE]
+> The project starts in **dev-only mode** (single environment) by default. To enable production mode with staged deployments (dev → stage → prod), see [Infrastructure: Deployment Modes](docs/infrastructure.md#deployment-modes).
+
+Follow three steps to get started:
+1. **Bootstrap CI/CD** — provision WIF, Artifact Registry, GCS state bucket, and GitHub Environments
+2. **Deploy** — merge a PR to trigger deployment to Cloud Run with Cloud SQL sessions, Agent Engine memory, and artifact storage
+3. **Run the Agent** — start a local agent or test the remote agent via the Cloud Run proxy
+
+See [Getting Started](docs/getting-started.md) for the complete walkthrough.
+
+## Documentation
+
+See [docs/](docs/) for complete documentation.
+
+### Core
+- **[Getting Started](docs/getting-started.md)** - Prerequisites, bootstrap, deploy, run
+- **[Development](docs/development.md)** - Local workflow, Docker, testing, code quality
+- **[Infrastructure](docs/infrastructure.md)** - Deployment modes, CI/CD, protection strategies, IaC
+- **[Environment Variables](docs/environment-variables.md)** - Complete configuration reference
+
+### Operations
+- **[Observability](docs/observability.md)** - OpenTelemetry traces and logs
+- **[Troubleshooting](docs/troubleshooting.md)** - Common issues and solutions
+
+### Syncing Upstream Changes
+- **[Template Management](docs/template-management.md)** - Syncing upstream agent-foundation changes
