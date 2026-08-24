@@ -12,10 +12,10 @@ from .prompt import (
     ROOT_AGENT_INSTRUCTION,
     return_global_instruction,
 )
-from .tools import get_current_time
+from .tools import get_table_schema, get_table_samples, apply_policy_tags
 
-APP_NAME = "agent_foundation"
-ROOT_AGENT_NAME = "agent_foundation"
+APP_NAME = "classification_tagging"
+ROOT_AGENT_NAME = "classification_tagging"
 ROOT_AGENT_MODEL = "gemini-2.5-flash"
 
 logging_callbacks = LoggingCallbacks()
@@ -27,7 +27,7 @@ root_agent = LlmAgent(
     after_agent_callback=[logging_callbacks.after_agent, add_session_to_memory],
     model=ROOT_AGENT_MODEL,
     instruction=ROOT_AGENT_INSTRUCTION,
-    tools=[FunctionTool(get_current_time), load_memory],
+    tools=[get_table_schema, get_table_samples, apply_policy_tags],
     before_model_callback=logging_callbacks.before_model,
     after_model_callback=logging_callbacks.after_model,
     before_tool_callback=logging_callbacks.before_tool,

@@ -3,70 +3,113 @@
 from datetime import UTC, datetime
 from typing import Any
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
-
+import json
 from google.adk.tools import ToolContext
+from google.cloud import bigquery
 
-DEFAULT_TIMEZONE_NAME = "UTC"
-SUCCESS_STATUS = "success"
-ERROR_STATUS = "error"
-SUCCESS_CODE = "current_time_retrieved"
-INVALID_TIMEZONE_CODE = "invalid_timezone"
-
-
-def get_current_time(
-    tool_context: ToolContext,
-    timezone_name: str = DEFAULT_TIMEZONE_NAME,
-) -> dict[str, Any]:
-    """Return the current time for a requested timezone.
-
-    Args:
-        timezone_name: IANA timezone name such as ``UTC`` or
-            ``America/New_York``.
-
-    Returns:
-        A dictionary describing either the current time lookup result or the
-        validation error for an unsupported timezone. ``timezone_abbreviation``
-        is ``None`` for the many zones that have no customary abbreviation;
-        name the UTC offset in that case rather than supplying one.
+def get_table_schema(project_id: str, dataset_id: str, table_name: str) -> str:
     """
-    # tool_context: ToolContext injected by ADK for session state access.
-    # Not included in the docstring to avoid confusing the LlmAgent.
-    normalized_timezone_name = timezone_name.strip() or DEFAULT_TIMEZONE_NAME
-
+    Retrieves the schema metadata for a specific BigQuery table.
+    Returns a JSON string of column names, their data types, and descriptions.
+    """
+    client = bigquery.Client(project=project_id)
+    table_fqn = f"{project_id}.{dataset_id}.{table_name}"
+    
     try:
-        timezone = ZoneInfo(normalized_timezone_name)
-    except ZoneInfoNotFoundError:
-        error_message = (
-            f"Unsupported timezone '{normalized_timezone_name}'. "
-            "Use an IANA timezone name such as 'UTC' or "
-            "'America/New_York'."
+        table = client.get_table(table_fqn)
+        
+        schema = {
+            field.name: {
+                "type": field.field_type,
+                "description": field.description or ""
+            }
+            for field in table.schema
+        }
+        return json.dumps(schema, indent=2)
+        
+    except Exception as e:
+        return json.dumps({"error": str(e)})
+
+def get_table_samples(project_id: str, dataset_id: str, table_name: str, num_rows: int = 10) -> str:
+    """
+    Retrieves a sample of rows from a BigQuery table directly from storage without 
+    requiring query job creation permissions, and pivots them into column arrays.
+    """
+    client = bigquery.Client(project=project_id)
+    table_fqn = f"{project_id}.{dataset_id}.{table_name}"
+    
+    try:
+        # Fetches rows directly from storage API (no SQL job needed)
+        rows = client.list_rows(table_fqn, max_results=num_rows)
+        
+        pivoted_samples = {}
+        
+        for row in rows:
+            for col_name, val in row.items():
+                if col_name not in pivoted_samples:
+                    pivoted_samples[col_name] = []
+                    
+                # Keep unique, non-null samples to keep the prompt lean
+                if val is not None and str(val) not in pivoted_samples[col_name]:
+                    pivoted_samples[col_name].append(str(val))
+                    
+        return json.dumps(pivoted_samples, indent=2)
+        
+    except Exception as e:
+        return json.dumps({"error": str(e)})
+
+
+def apply_policy_tags(
+    project_id: str,
+    dataset_id: str,
+    table_name: str,
+    approved_classifications: str,
+) -> str:
+    """Applies approved Policy Tags directly to BigQuery table column schema.
+
+    approved_classifications must be a JSON string mapping column_name ->
+    tag_type (e.g. '{"email": "PII"}'). ONLY call this tool AFTER the human user
+    explicitly approves the proposal in the chat.
+    """
+    try:
+        client = bigquery.Client(project=project_id)
+        table_fqn = f"{project_id}.{dataset_id}.{table_name}"
+        table = client.get_table(table_fqn)
+
+        tags_map = (
+            json.loads(approved_classifications)
+            if isinstance(approved_classifications, str)
+            else approved_classifications
         )
-        return {
-            "status": ERROR_STATUS,
-            "code": INVALID_TIMEZONE_CODE,
-            "message": error_message,
-            "requested_timezone": normalized_timezone_name,
+
+        TAXONOMY_MAP = {
+            "Non-sensitive": "projects/search-ahmed/locations/us/taxonomies/3115733225721264165/policyTags/8463002324035971336",
+            "PII": "projects/search-ahmed/locations/us/taxonomies/3115733225721264165/policyTags/5588035927081414315",
+            "SPII": "projects/search-ahmed/locations/us/taxonomies/3115733225721264165/policyTags/6855687727075655768",
         }
 
-    current_time = datetime.now(timezone)
-    utc_offset = current_time.strftime("%z")
-    formatted_utc_offset = f"{utc_offset[:3]}:{utc_offset[3:]}"
-    utc_time = current_time.astimezone(UTC)
+        updated_schema = []
+        applied_count = 0
 
-    # tzdata reports a numeric offset for zones with no customary abbreviation
-    abbreviation = current_time.strftime("%Z")
-    timezone_abbreviation = abbreviation if abbreviation.isalpha() else None
+        for field in table.schema:
+            field_dict = field.to_api_repr()
+            if field.name in tags_map and tags_map[field.name] in TAXONOMY_MAP:
+                field_dict["policyTags"] = {
+                    "names": [TAXONOMY_MAP[tags_map[field.name]]]
+                }
+                applied_count += 1
+            updated_schema.append(
+                bigquery.SchemaField.from_api_repr(field_dict)
+            )
 
-    message = f"Retrieved current time for {normalized_timezone_name}."
-    return {
-        "status": SUCCESS_STATUS,
-        "code": SUCCESS_CODE,
-        "message": message,
-        "timezone_name": normalized_timezone_name,
-        "timezone_abbreviation": timezone_abbreviation,
-        "current_time": current_time.isoformat(timespec="seconds"),
-        "current_date": current_time.date().isoformat(),
-        "day_of_week": current_time.strftime("%A"),
-        "utc_offset": formatted_utc_offset,
-        "utc_time": utc_time.isoformat(timespec="seconds"),
-    }
+        table.schema = updated_schema
+        client.update_table(table, ["schema"])
+
+        return json.dumps(
+            {
+                "status": "success",
+                "message": f"Successfully applied {applied_count} policy tags to {table_fqn}.",
+            }
+        )
+    except Exception as e:
+        return json.dumps({"status": "error", "details": str(e)})
