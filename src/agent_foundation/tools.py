@@ -39,7 +39,6 @@ def get_table_samples(project_id: str, dataset_id: str, table_name: str, num_row
     table_fqn = f"{project_id}.{dataset_id}.{table_name}"
     
     try:
-        # Fetches rows directly from storage API (no SQL job needed)
         rows = client.list_rows(table_fqn, max_results=num_rows)
         
         pivoted_samples = {}

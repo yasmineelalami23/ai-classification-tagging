@@ -1,0 +1,103 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI Data Governance - HITL Review</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="/static/css/dashboard.css">
+</head>
+<body class="bg-gray-50 text-gray-800 font-sans h-screen flex overflow-hidden">
+
+    <aside class="w-64 bg-white border-r border-gray-200 flex flex-col">
+        <div class="p-6 border-b border-gray-200">
+            <h1 class="text-xl font-bold text-indigo-600">AI Classification and Tagging</h1>
+            <p class="text-xs text-gray-500 mt-1">Steward Dashboard</p>
+        </div>
+        <nav class="flex-1 p-4 space-y-2">
+            <button onclick="switchTab('queue')" id="btn-queue" class="w-full flex items-center p-3 text-sm font-medium rounded-lg bg-indigo-50 text-indigo-700 transition-colors">
+                <span>Review Queue</span>
+                <span id="queue-badge" class="ml-auto bg-indigo-200 text-indigo-800 py-0.5 px-2 rounded-full text-xs">0</span>
+            </button>
+            <button onclick="switchTab('approved')" id="btn-approved" class="w-full flex items-center p-3 text-sm font-medium rounded-lg text-gray-600 hover:bg-gray-50 transition-colors">
+                <span>Approved Tags</span>
+            </button>
+        </nav>
+    </aside>
+
+    <main class="flex-1 flex flex-col h-full overflow-hidden">
+        <header class="bg-white border-b border-gray-200 p-6 flex justify-between items-center">
+            <h2 id="page-title" class="text-2xl font-semibold text-gray-800">Pending Approvals</h2>
+        </header>
+
+        <!-- Input Section for BigQuery Table Analysis -->
+        <div class="bg-indigo-50 border-b border-indigo-100 p-6 flex items-center space-x-4">
+            <div class="flex-1">
+                <label for="bq-table-input" class="block text-sm font-medium text-indigo-900 mb-1">BigQuery Table (project.dataset.table)</label>
+                <input type="text" id="bq-table-input" placeholder="e.g., search-ahmed.my_dataset.customers" class="w-full border-gray-300 rounded-md shadow-sm p-2 text-sm focus:ring-indigo-500 focus:border-indigo-500">
+            </div>
+            <div class="pt-6">
+                <button onclick="analyzeTable()" id="analyze-btn" class="bg-indigo-600 text-white px-4 py-2 rounded-md shadow-sm hover:bg-indigo-700 font-medium text-sm transition-colors flex items-center justify-center min-w-[160px]">
+                    <span id="analyze-text">Run AI Analysis</span>
+                    
+                    
+                    <span id="analyze-loading" class="hidden flex items-center space-x-2">
+                        <svg class="animate-spin h-4 w-4 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                            <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                            <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                        </svg>
+                        <span>Analyzing...</span>
+                    </span>
+                </button>
+            </div>
+        </div>
+
+        <div class="p-6 flex-1 overflow-y-auto">
+            <div id="tab-queue" class="tab-content active">
+                <div class="bg-white shadow-sm rounded-lg border border-gray-200 overflow-hidden">
+                    <table class="w-full text-left text-sm">
+                        <thead class="bg-gray-50 text-gray-600 border-b border-gray-200">
+                            <tr>
+                                <th class="p-4 font-semibold">Table / Column</th>
+                                <th class="p-4 font-semibold">AI Proposal</th>
+                                <th class="p-4 font-semibold">Confidence</th>
+                                <th class="p-4 font-semibold">Reasoning</th>
+                                <th class="p-4 font-semibold text-right flex justify-end items-center h-full">
+                                   
+                                    <span id="action-header-text">Action</span>
+                                    
+                                   
+                                    <button id="approve-all-btn" onclick="approveAll()" class="hidden bg-green-600 text-white px-3 py-1.5 rounded hover:bg-green-700 font-medium text-sm transition-colors shadow-sm min-w-[120px]">
+                                        <span id="approve-all-text" class="flex justify-center items-center w-full">Approve All</span>
+                                        
+                                       
+                                        <span id="approve-all-loading" class="hidden flex items-center justify-center space-x-2 w-full">
+                                            <svg class="animate-spin h-4 w-4 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                                                <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                                                <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                                            </svg>
+                                            <span>Applying...</span>
+                                        </span>
+                                    </button>
+                                </th>
+                            </tr>
+                        </thead>
+                        <tbody id="queue-table-body" class="divide-y divide-gray-100">
+
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+            <div id="tab-approved" class="tab-content">
+                <div class="bg-white shadow-sm rounded-lg border border-gray-200 p-6 text-center text-gray-500">
+                    <p>Approved tags will appear here.</p>
+                </div>
+            </div>
+        </div>
+    </main>
+
+    <div id="toast-container" class="fixed bottom-4 right-4 z-50 flex flex-col gap-2"></div>
+    <script src="/static/js/app.js?v=5"></script>
+</body>
+</html>
