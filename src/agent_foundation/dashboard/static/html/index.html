@@ -97,7 +97,27 @@
         </div>
     </main>
 
+    <div id="modify-modal" class="hidden fixed inset-0 bg-gray-900 bg-opacity-50 overflow-y-auto h-full w-full z-50 flex justify-center items-center">
+        <div class="bg-white p-6 rounded-lg shadow-xl w-96">
+            <h3 class="text-lg font-semibold text-gray-900 mb-2">Modify Classification</h3>
+            <p class="text-sm text-gray-500 mb-4">Select the correct security tag for this column to apply to BigQuery.</p>
+            
+            <input type="hidden" id="modify-item-id">
+            
+            <select id="modify-select" class="w-full border border-gray-300 rounded-md shadow-sm p-2 mb-6 focus:ring-indigo-500 focus:border-indigo-500 text-sm">
+                <option value="Non-sensitive">Non-sensitive</option>
+                <option value="PII">PII</option>
+                <option value="SPII">SPII</option>
+            </select>
+            
+            <div class="flex justify-end space-x-3">
+                <button onclick="closeModifyModal()" class="px-4 py-2 bg-gray-100 text-gray-700 rounded-md hover:bg-gray-200 transition-colors text-sm font-medium">Cancel</button>
+                <button onclick="saveModifiedTag()" class="px-4 py-2 bg-indigo-600 text-white rounded-md hover:bg-indigo-700 transition-colors text-sm font-medium">Save</button>
+            </div>
+        </div>
+    </div>
+
     <div id="toast-container" class="fixed bottom-4 right-4 z-50 flex flex-col gap-2"></div>
-    <script src="/static/js/app.js?v=5"></script>
+    <script src="/static/js/app.js?v=1706"></script>
 </body>
 </html>

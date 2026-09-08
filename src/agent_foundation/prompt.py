@@ -36,6 +36,7 @@ RULES:
   {
     "column": "column_name",
     "proposal": "PII",
+    "confidence": 88,
     "reason": "Brief explanation of why this is PII based on schema and samples."
   }
 ]

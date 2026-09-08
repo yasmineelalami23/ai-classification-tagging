@@ -27,6 +27,14 @@ class TagApprovalRequest(BaseModel):
     id: int
     approved_tag: str
 
+class BatchTagApprovalRequest(BaseModel):
+    ids: list[int]
+
+class ModifyQueueRequest(BaseModel):
+    id: int
+    proposal: str
+    reason: str
+
 # --- QUEUE ---
 REVIEW_QUEUE = []
 _current_id = 1
@@ -71,7 +79,7 @@ async def trigger_ai_analysis(request: AnalyzeRequest):
         }
         
 
-        prompt = f"Please analyze this table data:\n{json.dumps(table_context, indent=2)}"
+        prompt = f"Please analyze this table data and return a JSON array with 'column', 'proposal', 'reason', and a 'confidence' integer between 0 and 100:\n{json.dumps(table_context, indent=2)}"
         
 
         content = types.Content(role='user', parts=[types.Part(text=prompt)])
@@ -110,7 +118,7 @@ async def trigger_ai_analysis(request: AnalyzeRequest):
                 "table": table_name, 
                 "column": item.get("column", "Unknown"), 
                 "proposal": item.get("proposal", "Non-sensitive"),
-                "confidence": 95.0, 
+                "confidence": item.get("confidence", 90), 
                 "reason": item.get("reason", "No reason provided.")
             })
             _current_id += 1
@@ -150,3 +158,70 @@ async def approve_and_commit_tag(request: TagApprovalRequest):
         raise HTTPException(status_code=500, detail=result.get("details"))
 
     return {"status": "success", "message": result.get("message")}
+
+@router.post("/tags/approve-batch")
+async def approve_batch_tags(request: BatchTagApprovalRequest):
+    """Groups pending tags by table and applies them in a single BigQuery call."""
+    global REVIEW_QUEUE, APPROVED_QUEUE
+    
+    # 1. Isolate the items the user wants to approve
+    items_to_approve = [item for item in REVIEW_QUEUE if item["id"] in request.ids]
+    if not items_to_approve:
+        raise HTTPException(status_code=404, detail="No matching items found.")
+        
+    # 2. Group items by their BigQuery table
+    # Format: (project, dataset, table) -> {"col1": "tag1", "col2": "tag2"}
+    tables_map = {}
+    for item in items_to_approve:
+        key = (item["project"], item["dataset"], item["table"])
+        if key not in tables_map:
+            tables_map[key] = {}
+        # Use the currently proposed tag in the UI memory
+        tables_map[key][item["column"]] = item["proposal"]
+        
+    # 3. Send one API call per table to BigQuery
+    successful_ids = []
+    
+    for (project, dataset, table), classifications in tables_map.items():
+        classifications_json = json.dumps(classifications)
+        
+        result_str = apply_policy_tags(
+            project_id=project,
+            dataset_id=dataset,
+            table_name=table,
+            approved_classifications=classifications_json
+        )
+        
+        result = json.loads(result_str)
+        if result.get("status") == "error":
+
+            raise HTTPException(status_code=500, detail=f"Failed on {table}: {result.get('details')}")
+            
+       
+        for item in items_to_approve:
+            if (item["project"], item["dataset"], item["table"]) == (project, dataset, table):
+                successful_ids.append(item["id"])
+                
+
+                item_copy = item.copy()
+          
+                    
+
+    REVIEW_QUEUE = [item for item in REVIEW_QUEUE if item["id"] not in successful_ids]
+    
+    return {
+        "status": "success", 
+        "message": f"Lightning batch update: applied {len(successful_ids)} tags to BigQuery!"
+    }
+
+
+@router.put("/queue/modify")
+async def modify_queue_item(request: ModifyQueueRequest):
+    """Instantly syncs frontend modifications to the backend's queue memory."""
+    global REVIEW_QUEUE
+    for item in REVIEW_QUEUE:
+        if item["id"] == request.id:
+            item["proposal"] = request.proposal
+            item["reason"] = request.reason
+            return {"status": "success", "message": "Backend synced"}
+    raise HTTPException(status_code=404, detail="Item not found")

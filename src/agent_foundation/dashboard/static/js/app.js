@@ -1,3 +1,4 @@
+console.log("HELLO FROM BATCH VERSION 1000");
 let reviewQueue = [];
 
 async function fetchQueue() {
@@ -28,17 +29,40 @@ function renderQueue() {
     const approveAllBtn = document.getElementById('approve-all-btn');
     const actionText = document.getElementById('action-header-text');
     
+  
+    const inputField = document.getElementById('bq-table-input');
+    const analyzeBtn = document.getElementById('analyze-btn');
+    
     document.getElementById('queue-badge').innerText = reviewQueue.length;
+    
+
+    if (reviewQueue.length > 0) {
+
+        inputField.disabled = true;
+        inputField.classList.add('bg-gray-200', 'cursor-not-allowed');
+        inputField.placeholder = "Clear the review queue first...";
+        
+        analyzeBtn.disabled = true;
+        analyzeBtn.classList.add('opacity-50', 'cursor-not-allowed');
+        analyzeBtn.classList.remove('hover:bg-indigo-700');
+    } else {
+        // Open it up
+        inputField.disabled = false;
+        inputField.classList.remove('bg-gray-200', 'cursor-not-allowed');
+        inputField.placeholder = "e.g., search-ahmed.my_dataset.customers";
+        
+        analyzeBtn.disabled = false;
+        analyzeBtn.classList.remove('opacity-50', 'cursor-not-allowed');
+        analyzeBtn.classList.add('hover:bg-indigo-700');
+    }
     
     if (reviewQueue.length === 0) {
         tbody.innerHTML = `<tr><td colspan="5" class="p-8 text-center text-gray-500">No pending AI proposals.</td></tr>`;
         
-      
         if (approveAllBtn) approveAllBtn.classList.add('hidden');
         if (actionText) actionText.classList.remove('hidden');
         return;
     }
-
 
     if (approveAllBtn) approveAllBtn.classList.remove('hidden');
     if (actionText) actionText.classList.add('hidden');
@@ -58,7 +82,7 @@ function renderQueue() {
             <td class="p-4 text-gray-600 text-sm">${item.reason}</td>
             <td class="p-4 text-right flex justify-end items-center space-x-3 h-full">
                 <button onclick="modifyTag(${item.id})" class="text-indigo-600 hover:underline text-sm">Modify</button>
-                <button id="approve-btn-${item.id}" onclick="submitTag(${item.id}, '${item.proposal}')" class="bg-green-600 text-white px-3 py-1 rounded hover:bg-green-700 transition-colors shadow-sm min-w-[100px]">
+                <button id="approve-btn-${item.id}" onclick="submitTag(${item.id})" class="bg-green-600 text-white px-3 py-1 rounded hover:bg-green-700 transition-colors shadow-sm min-w-[100px]">
                     Approve
                 </button>
             </td>
@@ -66,7 +90,11 @@ function renderQueue() {
     `).join('');
 }
 
-async function submitTag(id, approvedTag) {
+async function submitTag(id) {
+    // Grab the latest tag from the local array
+    const item = reviewQueue.find(i => i.id === id);
+    const approvedTag = item.proposal;
+    
     const btn = document.getElementById(`approve-btn-${id}`);
     const originalHTML = btn ? btn.innerHTML : 'Approve';
     
@@ -122,35 +150,59 @@ async function submitTag(id, approvedTag) {
     }
 }
 
-function modifyTag(id) {
-    const newTag = prompt("Override AI proposal. Enter new tag (e.g., PII, SPII, Non-sensitive):");
-    
-    if (newTag) {
-        const trimmedTag = newTag.trim();
-        const itemIndex = reviewQueue.findIndex(i => i.id === id);
-        
-        if (itemIndex !== -1) {
-            const item = reviewQueue[itemIndex];
+// --- MODAL NEW FUNCTIONS ---
 
-            if (!item.originalProposal) {
-                item.originalProposal = item.proposal;
-                item.originalReason = item.reason;
-            }
-            
-            item.proposal = trimmedTag;
-            
-         
-            if (item.proposal.toLowerCase() === item.originalProposal.toLowerCase()) {
-                item.proposal = item.originalProposal; 
-                item.reason = item.originalReason;
-            } else {
-                item.reason = "⚠️ Modified by you (Original: " + item.originalProposal + ")";
-            }
-            
-            renderQueue();
+function modifyTag(id) {
+    const item = reviewQueue.find(i => i.id === id);
+    if (!item) return;
+    
+    document.getElementById('modify-item-id').value = id;
+    document.getElementById('modify-select').value = item.proposal;
+    document.getElementById('modify-modal').classList.remove('hidden');
+}
+
+function closeModifyModal() {
+    document.getElementById('modify-modal').classList.add('hidden');
+}
+
+
+async function saveModifiedTag() {
+    const id = parseInt(document.getElementById('modify-item-id').value);
+    const newTag = document.getElementById('modify-select').value;
+    
+    const itemIndex = reviewQueue.findIndex(i => i.id === id);
+    if (itemIndex !== -1) {
+        const item = reviewQueue[itemIndex];
+
+        if (!item.originalProposal) {
+            item.originalProposal = item.proposal;
+            item.originalReason = item.reason;
         }
+        
+        item.proposal = newTag;
+        
+        if (item.proposal === item.originalProposal) {
+            item.proposal = item.originalProposal; 
+            item.reason = item.originalReason;
+        } else {
+            item.reason = "⚠️ Modified by user (Original: " + item.originalProposal + ")";
+        }
+        
+        try {
+            await fetch('/api/queue/modify', {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ id: id, proposal: item.proposal, reason: item.reason })
+            });
+        } catch (error) {
+            console.error("Failed to sync modification:", error);
+        }
+        
+        renderQueue();
+        closeModifyModal();
     }
 }
+// -------------------------------------
 
 async function analyzeTable() {
     const inputField = document.getElementById('bq-table-input');
@@ -195,11 +247,10 @@ async function analyzeTable() {
     }
 }
 
-
 async function approveAll() {
     if (reviewQueue.length === 0) return;
     
-    const confirmMsg = `Are you sure you want to approve and apply all ${reviewQueue.length} tags to BigQuery?`;
+    const confirmMsg = `Are you sure you want to apply all ${reviewQueue.length} tags to BigQuery in one batch?`;
     if (!confirm(confirmMsg)) return;
 
     const btnText = document.getElementById('approve-all-text');
@@ -214,21 +265,36 @@ async function approveAll() {
         btn.classList.remove('hover:bg-green-700', 'bg-green-600');
     }
     
-    const itemsToApprove = [...reviewQueue];
+    const idsToApprove = reviewQueue.map(item => item.id);
     
-    for (const item of itemsToApprove) {
-        await submitTag(item.id, item.proposal); 
+    try {
+        const response = await fetch('/api/tags/approve-batch', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ ids: idsToApprove })
+        });
+        
+        const data = await response.json();
+        
+        if (response.ok) {
+            reviewQueue = reviewQueue.filter(item => !idsToApprove.includes(item.id));
+            renderQueue();
+            showToast(data.message || `Successfully applied batch tags!`);
+        } else {
+            showToast("Batch Failed: " + (data.detail || "Unknown error"), true);
+        }
+    } catch (error) {
+        console.error("Error in batch approval:", error);
+        showToast("Network error while trying to batch apply tags.", true);
+    } finally {
+        if(btnText) btnText.classList.remove('hidden');
+        if(loadingText) loadingText.classList.add('hidden');
+        if(btn) {
+            btn.disabled = false;
+            btn.classList.remove('cursor-wait', 'bg-gray-400');
+            btn.classList.add('hover:bg-green-700', 'bg-green-600');
+        }
     }
-    
-    if(btnText) btnText.classList.remove('hidden');
-    if(loadingText) loadingText.classList.add('hidden');
-    if(btn) {
-        btn.disabled = false;
-        btn.classList.remove('cursor-wait', 'bg-gray-400');
-        btn.classList.add('hover:bg-green-700', 'bg-green-600');
-    }
-    
-    showToast(`Finished processing all tags!`);
 }
 
 function showToast(message, isError = false) {
@@ -245,6 +311,5 @@ function showToast(message, isError = false) {
         setTimeout(() => toast.remove(), 300);
     }, 3500);
 }
-
 
 fetchQueue();
